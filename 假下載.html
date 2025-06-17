@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>下載模擬遊戲</title>
+  <style>
+    body {
+      background: #222;
+      font-family: "微軟正黑體", sans-serif;
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      color: white;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .window {
+      width: 400px;
+      background: #333;
+      border-radius: 10px;
+      box-shadow: 0 0 10px black;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative; /* 預設定位，拖曳後改為fixed */
+      top: 0;
+      left: 0;
+    }
+
+    .title-bar {
+      background: #444;
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: bold;
+      cursor: move; /* 拖曳手勢 */
+      user-select: none;
+    }
+
+    .close-btn {
+      cursor: pointer;
+      padding: 0 10px;
+      user-select: none;
+    }
+
+    .content {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      flex-grow: 1;
+    }
+
+    /* 進度條相關 */
+    .progress-container {
+      background: #555;
+      height: 30px;
+      border-radius: 5px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #0f0;
+      transition: width 0.5s linear;
+    }
+
+    .progress-text {
+      position: absolute;
+      width: 100%;
+      text-align: center;
+      top: 50%;
+      transform: translateY(-50%);
+      color: white;
+      font-weight: bold;
+      pointer-events: none;
+      font-size: 14px;
+      user-select: none;
+    }
+
+    .button {
+      padding: 10px;
+      background: #0a84ff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      color: white;
+      font-size: 16px;
+      user-select: none;
+    }
+
+    .button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+
+    .complete-message {
+      font-size: 18px;
+      color: #0f0;
+      text-align: center;
+      display: none;
+      user-select: none;
+    }
+
+    .time-estimate {
+      font-size: 14px;
+      color: #ccc;
+      text-align: center;
+      user-select: none;
+    }
+
+    /* 右側視窗元素 */
+    #output-link {
+      font-size: 12px;
+      word-break: break-all;
+      color: #0f0;
+      background: #222;
+      padding: 10px;
+      border-radius: 5px;
+      min-height: 40px;
+      user-select: text;
+    }
+
+    input[type="text"], input[type="range"] {
+      padding: 8px;
+      font-size: 14px;
+      border-radius: 4px;
+      border: none;
+      width: 100%;
+      box-sizing: border-box;
+      outline: none;
+      background: #555;
+      color: white;
+      user-select: text;
+    }
+
+    #final-image {
+      max-width: 100%;
+      border-radius: 5px;
+      display: none;
+      margin-top: 10px;
+      align-self: center;
+      box-shadow: 0 0 8px #0f0;
+      user-select: none;
+    }
+
+    .slider-label {
+      font-size: 13px;
+      color: #aaa;
+      user-select: none;
+      margin-bottom: -10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- 左側視窗：下載進度與按鈕 -->
+  <div class="window" id="window-download">
+    <div class="title-bar">
+      下載中......請勿關閉視窗
+      <span class="close-btn" onclick="document.getElementById('window-download').style.display='none'">✖</span>
+    </div>
+    <div class="content">
+      <div class="progress-container">
+        <div class="progress-bar" id="progress-bar"></div>
+        <div class="progress-text" id="progress-text">0.00%</div>
+      </div>
+      <div class="time-estimate" id="time-estimate">預估剩餘時間計算中...</div>
+      <button class="button" id="boost-btn" onclick="boost()">加速</button>
+      <div class="complete-message" id="message"></div>
+    </div>
+  </div>
+
+  <!-- 右側視窗：圖片網址輸入與輸出 -->
+  <div class="window" id="window-link" style="display:none;">
+    <div class="title-bar">
+      圖片網址輸入與輸出
+      <span class="close-btn" onclick="document.getElementById('window-link').style.display='none'">✖</span>
+    </div>
+    <div class="content">
+      <input type="text" id="img-url" placeholder="請輸入圖片網址（可選）" />
+      <label class="slider-label" for="duration-range">設定進度條滿值時間（30秒 ~ 12小時）：<span id="duration-text">1 小時 0 分 0 秒</span></label>
+      <input type="range" id="duration-range" min="30" max="43200" value="3600" step="1" />
+      <button class="button" onclick="generateLink()">輸出加密網址</button>
+      <div id="output-link"></div>
+      <img id="final-image" src="" />
+    </div>
+  </div>
+
+  <script>
+    // 加密與解密函式
+    function encrypt(url) {
+      return btoa("IMG::" + url);
+    }
+    function decrypt(data) {
+      try {
+        const decoded = atob(data);
+        if (decoded.startsWith("IMG::")) {
+          return decoded.slice(5);
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    // 格式化秒數為時分秒文字
+    function formatDuration(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      let result = "";
+      if (h > 0) result += `${h} 小時 `;
+      if (m > 0 || h > 0) result += `${m} 分 `;
+      result += `${s} 秒`;
+      return result;
+    }
+
+    // 取得 DOM 元素
+    const durationRange = document.getElementById('duration-range');
+    const durationText = document.getElementById('duration-text');
+    const imgUrlInput = document.getElementById('img-url');
+    const outputLink = document.getElementById('output-link');
+    const finalImage = document.getElementById('final-image');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const message = document.getElementById('message');
+    const boostBtn = document.getElementById('boost-btn');
+    const timeEstimateText = document.getElementById('time-estimate');
+    const windowLink = document.getElementById('window-link');
+
+    // 讀取 URL 參數
+    const params = new URLSearchParams(location.search);
+    let finalImageUrl = null;
+    let totalDuration = 5 * 1000; // 預設 5 秒，單位毫秒
+
+    if (params.has('img')) {
+      const dec = decrypt(params.get('img'));
+      if (dec) finalImageUrl = dec;
+    }
+
+    if (params.has('duration')) {
+      let durSec = parseInt(params.get('duration'), 10);
+      if (!isNaN(durSec) && durSec >= 30 && durSec <= 43200) {
+        totalDuration = durSec * 1000;
+        durationRange.value = durSec;
+        durationText.textContent = formatDuration(durSec);
+      } else {
+        // 若 duration 不合規則，還是用預設 5 秒
+        durationRange.value = 5;
+        durationText.textContent = formatDuration(5);
+      }
+    } else {
+      // 沒有傳入 duration，設定滑桿為 5 秒並更新顯示
+      durationRange.value = 5;
+      durationText.textContent = formatDuration(5);
+    }
+
+    // 初始滑桿顯示（如果是預設情況也顯示5秒）
+    durationText.textContent = formatDuration(parseInt(durationRange.value, 10));
+
+    // 滑桿改變時更新顯示文字
+    durationRange.addEventListener('input', () => {
+      durationText.textContent = formatDuration(parseInt(durationRange.value, 10));
+    });
+
+    // 進度相關變數
+    let startTime = Date.now();
+    let manualProgress = 0;
+    let progress = 0;
+    let boostCount = 0;
+    let lastBoostTime = 0;
+    const cooldownTime = 10; // 秒
+    const setbackInterval = 10 * 60 * 1000;
+    const setbackAmount = 20 * 60 * 1000;
+
+    let interval, estimateInterval, cooldownInterval, setbackTimer;
+
+    function updateProgress() {
+      const elapsed = Date.now() - startTime;
+      const naturalProgress = (elapsed / totalDuration) * 100;
+      progress = Math.min(100, naturalProgress + manualProgress);
+
+      progressBar.style.width = progress.toFixed(2) + "%";
+      progressText.textContent = progress.toFixed(2) + "%";
+
+      // 控制右側視窗顯示，100%前隱藏，100%時顯示
+      if (progress < 100) {
+        windowLink.style.display = "none";
+      } else {
+        windowLink.style.display = "flex";
+      }
+
+      if (progress >= 100) {
+        clearInterval(interval);
+        clearInterval(estimateInterval);
+        clearInterval(cooldownInterval);
+        clearInterval(setbackTimer);
+        boostBtn.disabled = true;
+        const totalUsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(totalUsed / 60);
+        const seconds = totalUsed % 60;
+        message.style.display = 'block';
+        message.innerHTML =
+          `下載完成！恭喜通關！<br>您總共加速了 ${boostCount} 次。<br>` +
+          `總共耗時：${minutes} 分 ${seconds} 秒`;
+        timeEstimateText.style.display = 'none';
+
+        if (finalImageUrl) {
+          finalImage.src = finalImageUrl;
+          finalImage.style.display = 'block';
+        }
+      }
+    }
+
+    function boost() {
+      const now = Date.now();
+      if (now - lastBoostTime >= cooldownTime * 1000) {
+        boostCount++;
+        lastBoostTime = now;
+        manualProgress += 0.05;
+        estimateRemainingTime();
+        startCooldown();
+      } else {
+        alert("太快了！每 10 秒只能加速一次！");
+      }
+    }
+
+    function startCooldown() {
+      let remaining = cooldownTime;
+      boostBtn.disabled = true;
+      boostBtn.textContent = `加速 (${remaining})`;
+
+      cooldownInterval = setInterval(() => {
+        remaining--;
+        boostBtn.textContent = `加速 (${remaining})`;
+        if (remaining <= 0) {
+          clearInterval(cooldownInterval);
+          boostBtn.disabled = false;
+          boostBtn.textContent = "加速";
+        }
+      }, 1000);
+    }
+
+    function estimateRemainingTime() {
+      if (progress >= 100) return;
+
+      const elapsed = Date.now() - startTime;
+      const realRemaining = totalDuration - elapsed - (manualProgress / 100) * totalDuration;
+      const clamped = Math.max(0, realRemaining);
+      const randomFactor = 0.9 + Math.random() * 0.2;
+      const estimate = clamped * randomFactor;
+
+      const secondsLeft = Math.floor(estimate / 1000);
+      const hour = Math.floor(secondsLeft / 3600);
+      const min = Math.floor((secondsLeft % 3600) / 60);
+      const sec = secondsLeft % 60;
+
+      timeEstimateText.textContent = `預估剩餘時間：約 ${hour} 小時 ${min} 分 ${sec} 秒`;
+    }
+
+    function attemptSetback() {
+      const chance = Math.random();
+      if (chance <= 0.05 && progress < 100) {
+        const setbackProgress = (setbackAmount / totalDuration) * 100;
+        manualProgress = Math.max(0, manualProgress - setbackProgress);
+        alert("發生錯誤！進度倒退了 20 分鐘！");
+        estimateRemainingTime();
+      }
+    }
+
+    function generateLink() {
+      const input = imgUrlInput.value.trim();
+      if (!input) {
+        alert("請輸入圖片網址！");
+        return;
+      }
+      const encrypted = encrypt(input);
+      const base = location.origin + location.pathname;
+      const dur = parseInt(durationRange.value, 10);
+      const url = `${base}?img=${encodeURIComponent(encrypted)}&duration=${dur}`;
+      outputLink.textContent = url;
+/*
+      // 更新 finalImageUrl 並隱藏圖片，待進度完成才顯示
+      finalImage.style.display = 'none';
+      finalImage.src = "";
+      finalImageUrl = input;
+
+      // 重設進度條和計時器
+      manualProgress = 0;
+      progress = 0;
+      boostCount = 0;
+      lastBoostTime = 0;
+      startTime = Date.now();
+      totalDuration = dur * 1000;
+      boostBtn.disabled = false;
+      message.style.display = 'none';
+      timeEstimateText.style.display = 'block';
+
+      // 重啟定時器
+      clearInterval(interval);
+      clearInterval(estimateInterval);
+      clearInterval(setbackTimer);
+      interval = setInterval(updateProgress, 100);
+      estimateInterval = setInterval(estimateRemainingTime, 60000);
+      setbackTimer = setInterval(attemptSetback, setbackInterval);
+      estimateRemainingTime();
+      progressBar.style.width = "0%";
+      progressText.textContent = "0.00%";
+      boostBtn.textContent = "加速";
+
+      // 新增：輸出視窗先隱藏
+      windowLink.style.display = "none";*/
+    }
+
+    // 啟動初始定時器（如果 URL 有參數）
+    if (params.has('img')) {
+      interval = setInterval(updateProgress, 100);
+      estimateInterval = setInterval(estimateRemainingTime, 60000);
+      setbackTimer = setInterval(attemptSetback, setbackInterval);
+      estimateRemainingTime();
+    } else {
+      // 沒有參數就隱藏右邊輸入視窗，且使用5秒預設時間
+      windowLink.style.display = "none";
+      totalDuration = 5 * 1000;
+      durationRange.value = 5;
+      durationText.textContent = formatDuration(5);
+
+      interval = setInterval(updateProgress, 100);
+      estimateInterval = setInterval(estimateRemainingTime, 60000);
+      setbackTimer = setInterval(attemptSetback, setbackInterval);
+      estimateRemainingTime();
+    }
+
+    // 拖曳視窗功能
+    function makeDraggable(el) {
+      const header = el.querySelector('.title-bar');
+      let offsetX = 0, offsetY = 0;
+      let isDragging = false;
+
+      header.style.cursor = 'move';
+
+      header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        const rect = el.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        document.body.style.userSelect = 'none';
+      });
+
+      window.addEventListener('mouseup', () => {
+        isDragging = false;
+        document.body.style.userSelect = '';
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        let x = e.clientX - offsetX;
+        let y = e.clientY - offsetY;
+
+        const maxX = window.innerWidth - el.offsetWidth;
+        const maxY = window.innerHeight - el.offsetHeight;
+        if (x < 0) x = 0;
+        else if (x > maxX) x = maxX;
+        if (y < 0) y = 0;
+        else if (y > maxY) y = maxY;
+
+        el.style.position = 'fixed';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+      });
+    }
+
+    // 初始化兩個視窗拖曳
+    makeDraggable(document.getElementById('window-download'));
+    makeDraggable(document.getElementById('window-link'));
+  </script>
+</body>
+</html>
