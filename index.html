@@ -195,19 +195,37 @@
   </div>
 
   <script>
+// 驗證圖片網址是否安全
+function isSafeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const safeProtocols = ['http:', 'https:'];
+    const hasScript = /<script|javascript:|onerror\s*=|onload\s*=|<img/i.test(url);
+    return safeProtocols.includes(parsed.protocol) && !hasScript;
+  } catch (e) {
+    return false;
+  }
+}
     // 加密與解密函式
     function encrypt(url) {
+      if (!isSafeUrl(url)) {
+        throw new Error("不安全的網址，無法加密。");
+      }
       return btoa("IMG::" + url);
     }
     function decrypt(data) {
-      try {
-        const decoded = atob(data);
-        if (decoded.startsWith("IMG::")) {
-          return decoded.slice(5);
-        }
-      } catch (e) {}
-      return null;
+  try {
+    const decoded = atob(data);
+    if (decoded.startsWith("IMG::")) {
+      const url = decoded.slice(5);
+      if (isSafeUrl(url)) {
+        return url;
+      }
     }
+  } catch (e) {}
+
+  return null;
+}
 
     // 格式化秒數為時分秒文字
     function formatDuration(seconds) {
