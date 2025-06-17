@@ -194,40 +194,39 @@
     </div>
   </div>
 
-  <script>
-// 驗證圖片網址是否安全
-function isSafeUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const safeProtocols = ['http:', 'https:'];
-    const hasScript = /<script|javascript:|onerror\s*=|onload\s*=|<img/i.test(url);
-    return safeProtocols.includes(parsed.protocol) && !hasScript;
-  } catch (e) {
-    return false;
-  }
-}
-    // 加密與解密函式
-    function encrypt(url) {
-      if (!isSafeUrl(url)) {
-        throw new Error("不安全的網址，無法加密。");
-      }
-      return btoa("IMG::" + url);
-    }
-    function decrypt(data) {
-  try {
-    const decoded = atob(data);
-    if (decoded.startsWith("IMG::")) {
-      const url = decoded.slice(5);
-      if (isSafeUrl(url)) {
-        return url;
+ <script>
+    // 驗證圖片網址是否安全
+    function isSafeUrl(url) {
+      try {
+        const parsed = new URL(url);
+        const safeProtocols = ['http:', 'https:'];
+        const hasScript = /<script|javascript:|onerror\s*=|onload\s*=|<img/i.test(url);
+        return safeProtocols.includes(parsed.protocol) && !hasScript;
+      } catch (e) {
+        return false;
       }
     }
-  } catch (e) {}
 
-  return null;
-}
+    // 加密與解密函式（整合 img + duration）
+    function encryptCombined(url, duration) {
+      if (!isSafeUrl(url)) throw new Error("不安全的網址，無法加密。");
+      return btoa(`IMG::${url}::${duration}`);
+    }
 
-    // 格式化秒數為時分秒文字
+    function decryptCombined(data) {
+      try {
+        const decoded = atob(data);
+        if (decoded.startsWith("IMG::")) {
+          const parts = decoded.split("::");
+          if (parts.length === 3 && isSafeUrl(parts[1])) {
+            return { url: parts[1], duration: parseInt(parts[2], 10) };
+          }
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    // 格式化秒數為文字
     function formatDuration(seconds) {
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
@@ -239,7 +238,7 @@ function isSafeUrl(url) {
       return result;
     }
 
-    // 取得 DOM 元素
+    // DOM 元素初始化
     const durationRange = document.getElementById('duration-range');
     const durationText = document.getElementById('duration-text');
     const imgUrlInput = document.getElementById('img-url');
@@ -252,48 +251,38 @@ function isSafeUrl(url) {
     const timeEstimateText = document.getElementById('time-estimate');
     const windowLink = document.getElementById('window-link');
 
-    // 讀取 URL 參數
     const params = new URLSearchParams(location.search);
     let finalImageUrl = null;
-    let totalDuration = 5 * 1000; // 預設 5 秒，單位毫秒
+    let totalDuration = 5 * 1000;
 
-    if (params.has('img')) {
-      const dec = decrypt(params.get('img'));
-      if (dec) finalImageUrl = dec;
-    }
-
-    if (params.has('duration')) {
-      let durSec = parseInt(params.get('duration'), 10);
-      if (!isNaN(durSec) && durSec >= 30 && durSec <= 43200) {
-        totalDuration = durSec * 1000;
-        durationRange.value = durSec;
-        durationText.textContent = formatDuration(durSec);
+    // 解析加密資料（解密）
+    if (params.has('data')) {
+      const result = decryptCombined(params.get('data'));
+      if (result && result.url && result.duration >= 30 && result.duration <= 43200) {
+        finalImageUrl = result.url;
+        totalDuration = result.duration * 1000;
+        durationRange.value = result.duration;
+        durationText.textContent = formatDuration(result.duration);
       } else {
-        // 若 duration 不合規則，還是用預設 5 秒
         durationRange.value = 5;
         durationText.textContent = formatDuration(5);
       }
     } else {
-      // 沒有傳入 duration，設定滑桿為 5 秒並更新顯示
       durationRange.value = 5;
       durationText.textContent = formatDuration(5);
     }
 
-    // 初始滑桿顯示（如果是預設情況也顯示5秒）
     durationText.textContent = formatDuration(parseInt(durationRange.value, 10));
-
-    // 滑桿改變時更新顯示文字
     durationRange.addEventListener('input', () => {
       durationText.textContent = formatDuration(parseInt(durationRange.value, 10));
     });
 
-    // 進度相關變數
     let startTime = Date.now();
     let manualProgress = 0;
     let progress = 0;
     let boostCount = 0;
     let lastBoostTime = 0;
-    const cooldownTime = 10; // 秒
+    const cooldownTime = 10;
     const setbackInterval = 10 * 60 * 1000;
     const setbackAmount = 20 * 60 * 1000;
 
@@ -303,11 +292,9 @@ function isSafeUrl(url) {
       const elapsed = Date.now() - startTime;
       const naturalProgress = (elapsed / totalDuration) * 100;
       progress = Math.min(100, naturalProgress + manualProgress);
-
       progressBar.style.width = progress.toFixed(2) + "%";
       progressText.textContent = progress.toFixed(2) + "%";
 
-      // 控制右側視窗顯示，100%前隱藏，100%時顯示
       if (progress < 100) {
         windowLink.style.display = "none";
       } else {
@@ -367,24 +354,20 @@ function isSafeUrl(url) {
 
     function estimateRemainingTime() {
       if (progress >= 100) return;
-
       const elapsed = Date.now() - startTime;
       const realRemaining = totalDuration - elapsed - (manualProgress / 100) * totalDuration;
       const clamped = Math.max(0, realRemaining);
       const randomFactor = 0.9 + Math.random() * 0.2;
       const estimate = clamped * randomFactor;
-
       const secondsLeft = Math.floor(estimate / 1000);
       const hour = Math.floor(secondsLeft / 3600);
       const min = Math.floor((secondsLeft % 3600) / 60);
       const sec = secondsLeft % 60;
-
       timeEstimateText.textContent = `預估剩餘時間：約 ${hour} 小時 ${min} 分 ${sec} 秒`;
     }
 
     function attemptSetback() {
-      const chance = Math.random();
-      if (chance <= 0.05 && progress < 100) {
+      if (Math.random() <= 0.05 && progress < 100) {
         const setbackProgress = (setbackAmount / totalDuration) * 100;
         manualProgress = Math.max(0, manualProgress - setbackProgress);
         alert("發生錯誤！進度倒退了 20 分鐘！");
@@ -394,75 +377,39 @@ function isSafeUrl(url) {
 
     function generateLink() {
       const input = imgUrlInput.value.trim();
-      if (!input) {
-        alert("請輸入圖片網址！");
+      const dur = parseInt(durationRange.value, 10);
+      if (!input || isNaN(dur)) {
+        alert("請輸入圖片網址並選擇時間！");
         return;
       }
-      const encrypted = encrypt(input);
-      const base = location.origin + location.pathname;
-      const dur = parseInt(durationRange.value, 10);
-      const url = `${base}?img=${encodeURIComponent(encrypted)}&duration=${dur}`;
-      outputLink.textContent = url;
-/*
-      // 更新 finalImageUrl 並隱藏圖片，待進度完成才顯示
-      finalImage.style.display = 'none';
-      finalImage.src = "";
-      finalImageUrl = input;
-
-      // 重設進度條和計時器
-      manualProgress = 0;
-      progress = 0;
-      boostCount = 0;
-      lastBoostTime = 0;
-      startTime = Date.now();
-      totalDuration = dur * 1000;
-      boostBtn.disabled = false;
-      message.style.display = 'none';
-      timeEstimateText.style.display = 'block';
-
-      // 重啟定時器
-      clearInterval(interval);
-      clearInterval(estimateInterval);
-      clearInterval(setbackTimer);
-      interval = setInterval(updateProgress, 100);
-      estimateInterval = setInterval(estimateRemainingTime, 60000);
-      setbackTimer = setInterval(attemptSetback, setbackInterval);
-      estimateRemainingTime();
-      progressBar.style.width = "0%";
-      progressText.textContent = "0.00%";
-      boostBtn.textContent = "加速";
-
-      // 新增：輸出視窗先隱藏
-      windowLink.style.display = "none";*/
+      try {
+        const encrypted = encryptCombined(input, dur);
+        const base = location.origin + location.pathname;
+        const url = `${base}?data=${encodeURIComponent(encrypted)}`;
+        outputLink.textContent = url;
+      } catch (err) {
+        alert(err.message);
+      }
     }
 
-    // 啟動初始定時器（如果 URL 有參數）
-    if (params.has('img')) {
+    if (params.has('data')) {
       interval = setInterval(updateProgress, 100);
       estimateInterval = setInterval(estimateRemainingTime, 60000);
       setbackTimer = setInterval(attemptSetback, setbackInterval);
       estimateRemainingTime();
     } else {
-      // 沒有參數就隱藏右邊輸入視窗，且使用5秒預設時間
       windowLink.style.display = "none";
-      totalDuration = 5 * 1000;
-      durationRange.value = 5;
-      durationText.textContent = formatDuration(5);
-
       interval = setInterval(updateProgress, 100);
       estimateInterval = setInterval(estimateRemainingTime, 60000);
       setbackTimer = setInterval(attemptSetback, setbackInterval);
       estimateRemainingTime();
     }
 
-    // 拖曳視窗功能
+    // 拖曳功能與初始化
     function makeDraggable(el) {
       const header = el.querySelector('.title-bar');
-      let offsetX = 0, offsetY = 0;
-      let isDragging = false;
-
+      let offsetX = 0, offsetY = 0, isDragging = false;
       header.style.cursor = 'move';
-
       header.addEventListener('mousedown', (e) => {
         isDragging = true;
         const rect = el.getBoundingClientRect();
@@ -470,31 +417,24 @@ function isSafeUrl(url) {
         offsetY = e.clientY - rect.top;
         document.body.style.userSelect = 'none';
       });
-
       window.addEventListener('mouseup', () => {
         isDragging = false;
         document.body.style.userSelect = '';
       });
-
       window.addEventListener('mousemove', (e) => {
         if (!isDragging) return;
         let x = e.clientX - offsetX;
         let y = e.clientY - offsetY;
-
         const maxX = window.innerWidth - el.offsetWidth;
         const maxY = window.innerHeight - el.offsetHeight;
-        if (x < 0) x = 0;
-        else if (x > maxX) x = maxX;
-        if (y < 0) y = 0;
-        else if (y > maxY) y = maxY;
-
+        x = Math.max(0, Math.min(x, maxX));
+        y = Math.max(0, Math.min(y, maxY));
         el.style.position = 'fixed';
         el.style.left = x + 'px';
         el.style.top = y + 'px';
       });
     }
 
-    // 初始化兩個視窗拖曳
     makeDraggable(document.getElementById('window-download'));
     makeDraggable(document.getElementById('window-link'));
   </script>
